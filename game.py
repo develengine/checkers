@@ -16,11 +16,13 @@ board = [ ]
 player = True
 selected = None
 must_jump = False
+protected = None
+reserved = None
+use_reserved = False
 
 for _ in range(8):
     board.append([''] * 8)
 
-print(list(range(0, 8, 2)))
 for i in range(0, 8, 2):
     board[i][0] = 'bp'
 for i in range(1, 8, 2):
@@ -29,17 +31,21 @@ for i in range(0, 8, 2):
     board[i][6] = 'wp'
 for i in range(1, 8, 2):
     board[i][7] = 'wp'
-board[6][6] = 'wq'
-board[3][3] = 'bp'
-board[1][3] = 'bp'
-board[5][5] = 'bp'
-board[1][5] = 'bp'
-board[3][5] = 'bp'
-board[2][6] = ''
+# board[6][6] = 'wq'
+# board[3][3] = 'bp'
+# board[1][3] = 'bp'
+# board[5][5] = 'bp'
+# board[1][5] = 'bp'
+# board[3][5] = 'bp'
+# board[2][6] = ''
 
 def callback(event):
     global selected
     global must_jump
+    global player
+    global protected
+    global reserved
+    global use_reserved
 
     def redraw_all():
         clear_canvas()
@@ -52,6 +58,9 @@ def callback(event):
         return True
 
     def can_jump(x, y):
+        global reserved
+        global use_reserved
+
         piece = board[x][y]
         if piece[1] == 'q':
             for i in [(1, 1), (-1, 1), (1, -1), (-1, -1)]:
@@ -60,6 +69,8 @@ def callback(event):
                 yp = y + i[1]
                 while -1 < xp < 8 and -1 < yp < 8:
                     on_piece = board[xp][yp]
+                    if use_reserved and reserved != None and xp == reserved[0] and yp == reserved[1]:
+                        break
                     if on_piece == '':
                         if enemy:
                             return True
@@ -74,22 +85,44 @@ def callback(event):
         else:
             f = -1 if piece[0] == 'w' else 1
             for i in [(1 * f, 1 * f), (-1 * f, 1 * f)]:
-                on_piece = board[x + i[0]][y + i[1]]
-                if on_piece == '' or on_piece[0] == piece[0]:
-                    continue
-                elif board[x + i[0] * 2][y + i[1] * 2] == '':
-                    return True
+                if -1 < x + i[0] < 8 and -1 < y + i[1] < 8:
+                    on_piece = board[x + i[0]][y + i[1]]
+                    if on_piece == '' or on_piece[0] == piece[0]:
+                        continue
+                    elif -1 < (x + i[0] * 2) < 8 and -1 < (y + i[1] * 2) < 8 and board[x + i[0] * 2][y + i[1] * 2] == '':
+                        if use_reserved and reserved != None and x + i[0] * 2 == reserved[0] and y + i[1] * 2 == reserved[1]:
+                            continue
+                        return True
         return False
 
     def swap_sides():
+        global player
+        global must_jump
+        global protected
+        global reserved
+
+        use_reserved = True
+
+        kills = [ ]
+        for x in range(len(board)):
+            for y in range(len(board[x])):
+                if board[x][y] != '' and (board[x][y][0] == 'w') == player and can_jump(x, y):
+                    kills.append((x, y))
+
+        for i in kills:
+            if protected == None or not (protected[0] == i[0] and protected[1] == i[1]):
+                board[i[0]][i[1]] = ''
+
+        use_reserved = False
+        protected = None
+        reserved = None
+
         player = not player
-        
+
 
     x = event.x // unit
     y = event.y // unit
     piece = board[x][y]
-    print('clicked at', x, y)
-    print(piece)
 
     if selected == None:
         if piece == '':
@@ -136,9 +169,19 @@ def callback(event):
         return
     if dir_x == vx:
         if not must_jump:
-            board[x][y] = selected_piece
+            if can_jump(selected[0], selected[1]):
+                selected = None
+                redraw_all()
+                return
+            new_piece = selected_piece
+            if selected_piece[1] == 'p' and (y == 0 or y == 7):
+                new_piece = selected_piece[0] + 'q'
+            board[x][y] = new_piece
             board[selected[0]][selected[1]] = ''
+            reserved = selected
             selected = None
+            protected = (x, y)
+            swap_sides()
             redraw_all()
         return
 
@@ -147,6 +190,8 @@ def callback(event):
             if selected_piece[1] == 'q' and is_clear(selected[0] + dir_x, selected[1] + dir_y, dir_x, dir_y, abs(vx) - 2):
                 board[x][y] = selected_piece
                 board[selected[0]][selected[1]] = ''
+                protected = (x, y)
+                swap_sides()
             selected = None
             redraw_all()
     elif behind[0] == selected_piece[0]:
@@ -156,15 +201,24 @@ def callback(event):
     else:
         if selected_piece[1] == 'p':
             if abs(vx) == 2:
-                board[x][y] = selected_piece
+                new_piece = selected_piece
+                if selected_piece[1] == 'p' and (y == 0 or y == 7):
+                    new_piece = selected_piece[0] + 'q'
+                board[x][y] = new_piece
                 board[selected[0]][selected[1]] = ''
                 board[x - dir_x][y - dir_y] = ''
+                if not must_jump:
+                    reserved = selected
                 must_jump = can_jump(x, y)
-                redraw_all()
+                if new_piece[1] == 'q':
+                    must_jump = False
                 if must_jump:
                     selected = (x, y)
+                    redraw_all()
                     draw_highlight(x, y, "red");
                 else:
+                    swap_sides()
+                    redraw_all()
                     selected = None
             else:
                 if not must_jump:
@@ -174,12 +228,16 @@ def callback(event):
             board[x][y] = selected_piece
             board[selected[0]][selected[1]] = ''
             board[x - dir_x][y - dir_y] = ''
+            if not must_jump:
+                reserved = selected
             must_jump = can_jump(x, y)
-            redraw_all()
             if must_jump:
                 selected = (x, y)
+                redraw_all()
                 draw_highlight(x, y, "red");
             else:
+                swap_sides()
+                redraw_all()
                 selected = None
         else:
             if not must_jump:
